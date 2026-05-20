@@ -19,7 +19,14 @@ import { useMemo, useEffect, useState } from "react";
 import PropTypes from "prop-types";
 
 // react-table components
-import { useTable, usePagination, useGlobalFilter, useAsyncDebounce, useSortBy } from "react-table";
+import {
+  useTable,
+  usePagination,
+  useGlobalFilter,
+  useFilters,
+  useAsyncDebounce,
+  useSortBy,
+} from "react-table";
 
 // @mui material components
 import Table from "@mui/material/Table";
@@ -42,6 +49,7 @@ import DataTableBodyCell from "examples/Tables/DataTable/DataTableBodyCell";
 function DataTable({
   entriesPerPage,
   canSearch,
+  canFilter,
   showTotalEntries,
   table,
   pagination,
@@ -58,6 +66,7 @@ function DataTable({
   const tableInstance = useTable(
     { columns, data, initialState: { pageIndex: 0 } },
     useGlobalFilter,
+    useFilters,
     useSortBy,
     usePagination
   );
@@ -77,6 +86,7 @@ function DataTable({
     previousPage,
     setPageSize,
     setGlobalFilter,
+    setFilter,
     state: { pageIndex, pageSize, globalFilter },
   } = tableInstance;
 
@@ -115,6 +125,13 @@ function DataTable({
   const onSearchChange = useAsyncDebounce((value) => {
     setGlobalFilter(value || undefined);
   }, 100);
+
+  // Column filter input state (local, then debounced into react-table)
+  const [columnFilters, setColumnFilters] = useState({});
+  const onColumnFilterChange = useAsyncDebounce((accessor, value) => {
+    // react-table expects undefined to clear filter
+    setFilter(accessor, value || undefined);
+  }, 150);
 
   // A function that sets the sorted value for the table
   const setSortedValue = (column) => {
@@ -175,8 +192,9 @@ function DataTable({
                 size="small"
                 fullWidth
                 onChange={({ currentTarget }) => {
-                  setSearch(search);
-                  onSearchChange(currentTarget.value);
+                  const nextValue = currentTarget.value;
+                  setSearch(nextValue);
+                  onSearchChange(nextValue);
                 }}
               />
             </MDBox>
@@ -186,19 +204,55 @@ function DataTable({
       <Table {...getTableProps()}>
         <MDBox component="thead">
           {headerGroups.map((headerGroup, key) => (
-            <TableRow key={key} {...headerGroup.getHeaderGroupProps()}>
-              {headerGroup.headers.map((column, idx) => (
-                <DataTableHeadCell
-                  key={idx}
-                  {...column.getHeaderProps(isSorted && column.getSortByToggleProps())}
-                  width={column.width ? column.width : "auto"}
-                  align={column.align ? column.align : "left"}
-                  sorted={setSortedValue(column)}
-                >
-                  {column.render("Header")}
-                </DataTableHeadCell>
-              ))}
-            </TableRow>
+            <>
+              <TableRow key={`header-${key}`} {...headerGroup.getHeaderGroupProps()}>
+                {headerGroup.headers.map((column, idx) => (
+                  <DataTableHeadCell
+                    key={idx}
+                    {...column.getHeaderProps(isSorted && column.getSortByToggleProps())}
+                    width={column.width ? column.width : "auto"}
+                    align={column.align ? column.align : "left"}
+                    sorted={setSortedValue(column)}
+                  >
+                    {column.render("Header")}
+                  </DataTableHeadCell>
+                ))}
+              </TableRow>
+              {canFilter && (
+                <TableRow key={`filters-${key}`} {...headerGroup.getHeaderGroupProps()}>
+                  {headerGroup.headers.map((column, idx) => {
+                    const accessor = column.id; // react-table normalizes accessor into id
+                    const isActionColumn = accessor === "action";
+                    return (
+                      <DataTableHeadCell
+                        key={idx}
+                        width={column.width ? column.width : "auto"}
+                        align={column.align ? column.align : "left"}
+                        sorted={false}
+                      >
+                        {isActionColumn ? (
+                          <MDTypography variant="caption" color="secondary" sx={{ opacity: 0.7 }}>
+                            —
+                          </MDTypography>
+                        ) : (
+                          <MDInput
+                            placeholder="Filter..."
+                            size="small"
+                            fullWidth
+                            value={columnFilters[accessor] ?? ""}
+                            onChange={({ currentTarget }) => {
+                              const nextValue = currentTarget.value;
+                              setColumnFilters((prev) => ({ ...prev, [accessor]: nextValue }));
+                              onColumnFilterChange(accessor, nextValue);
+                            }}
+                          />
+                        )}
+                      </DataTableHeadCell>
+                    );
+                  })}
+                </TableRow>
+              )}
+            </>
           ))}
         </MDBox>
         <TableBody {...getTableBodyProps()}>
@@ -273,6 +327,7 @@ function DataTable({
 DataTable.defaultProps = {
   entriesPerPage: { defaultValue: 10, entries: [5, 10, 15, 20, 25] },
   canSearch: false,
+  canFilter: false,
   showTotalEntries: true,
   pagination: { variant: "gradient", color: "info" },
   isSorted: true,
@@ -289,6 +344,7 @@ DataTable.propTypes = {
     PropTypes.bool,
   ]),
   canSearch: PropTypes.bool,
+  canFilter: PropTypes.bool,
   showTotalEntries: PropTypes.bool,
   table: PropTypes.objectOf(PropTypes.array).isRequired,
   pagination: PropTypes.shape({
